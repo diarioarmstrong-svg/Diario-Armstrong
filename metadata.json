@@ -1,0 +1,8 @@
+{
+  "name": "Digitalizador de Documentos",
+  "description": "Digitaliza facturas, remitos, notas, presupuestos, recibos y planillas a partir de fotos o PDFs en tres formatos: texto, JSON y CSV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
