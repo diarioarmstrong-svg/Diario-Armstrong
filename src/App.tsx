@@ -4,6 +4,8 @@ import FileUploader from "./components/FileUploader";
 import ScanResultViewer from "./components/ScanResultViewer";
 import ScanHistory from "./components/ScanHistory";
 import { ScanHistoryItem, DigitalizedResult } from "./types";
+import { db } from "./firebase";
+import { collection, addDoc, getDocs, query, orderBy, deleteDoc, doc, Timestamp } from "firebase/firestore";
 
 export default function App() {
   // Estados de carga de Archivos
@@ -24,12 +26,41 @@ export default function App() {
 
   // 1. Cargar historial y estado de digitalización activa al iniciar (Persistencia automática)
   useEffect(() => {
-    try {
-      // Cargar historial
-      const storedHistory = localStorage.getItem("digitalizer_history");
-      if (storedHistory) {
-        setHistory(JSON.parse(storedHistory));
+    const fetchHistory = async () => {
+      try {
+        const q = query(collection(db, "scans"), orderBy("timestamp", "desc"));
+        const querySnapshot = await getDocs(q);
+        const firebaseHistory: ScanHistoryItem[] = [];
+        querySnapshot.forEach((doc) => {
+          const data = doc.data();
+          firebaseHistory.push({
+            ...data,
+            id: doc.id,
+            timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate().toISOString() : data.timestamp
+          } as ScanHistoryItem);
+        });
+        
+        if (firebaseHistory.length > 0) {
+          setHistory(firebaseHistory);
+        } else {
+          // Fallback a localStorage si no hay nada en Firebase
+          const storedHistory = localStorage.getItem("digitalizer_history");
+          if (storedHistory) {
+            setHistory(JSON.parse(storedHistory));
+          }
+        }
+      } catch (err) {
+        console.error("Error al cargar historial de Firebase:", err);
+        const storedHistory = localStorage.getItem("digitalizer_history");
+        if (storedHistory) {
+          setHistory(JSON.parse(storedHistory));
+        }
       }
+    };
+
+    fetchHistory();
+
+    try {
 
       // Recuperar estado de la última digitalización activa cargada/procesada
       const lastActiveResult = localStorage.getItem("digitalizer_active_result");
@@ -166,7 +197,13 @@ export default function App() {
     setServerError(null);
   };
 
-  const handleDeleteHistoryItem = (id: string) => {
+  const handleDeleteHistoryItem = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "scans", id));
+    } catch (err) {
+      console.error("Error al eliminar de Firebase:", err);
+    }
+    
     const updated = history.filter((x) => x.id !== id);
     saveHistoryToLocalStorage(updated);
     if (activeScanId === id) {
@@ -233,20 +270,33 @@ export default function App() {
       const uniqueId = crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(7);
 
       // Crear nuevo registro en el historial
-      const newHistoryItem: ScanHistoryItem = {
-        id: uniqueId,
+      const historyData = {
         name: `Digitalización - ${data.documentoJson.emisor?.nombre || data.documentoJson.tipo_documento || "Documento"}`,
-        timestamp: new Date().toISOString(),
+        timestamp: Timestamp.now(),
         docType: mappedType,
         fileName: fileName || "documento_desconocido",
         fileType: fileType || "image/jpeg",
-        imageUrl: base64Data, // Almacenar el preview de forma local
+        imageUrl: base64Data,
         result: data,
+      };
+
+      let finalId = uniqueId;
+      try {
+        const docRef = await addDoc(collection(db, "scans"), historyData);
+        finalId = docRef.id;
+      } catch (err) {
+        console.error("Error al guardar en Firebase:", err);
+      }
+
+      const newHistoryItem: ScanHistoryItem = {
+        ...historyData,
+        id: finalId,
+        timestamp: new Date().toISOString(),
       };
 
       const updatedHistory = [newHistoryItem, ...history];
       saveHistoryToLocalStorage(updatedHistory);
-      setActiveScanId(uniqueId);
+      setActiveScanId(finalId);
 
     } catch (err: any) {
       console.error(err);
